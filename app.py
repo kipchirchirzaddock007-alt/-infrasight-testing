@@ -154,7 +154,7 @@ def leader_panel():
         if ambulances:
             df_amb = pd.DataFrame(
                 ambulances,
-                columns=[
+                columns[
                     "id",
                     "name",
                     "number_plate",
@@ -227,7 +227,7 @@ def leader_panel():
             st.info("No projects registered yet.")
 
 
-# ------------- CITIZEN VIEW (simple testing version) -------------
+# ------------- CITIZEN VIEW (testing) -------------
 
 def citizen_view():
     st.header("INFRASIGHT – Citizen Role Dashboard")

@@ -85,6 +85,9 @@ def init_db():
 
         conn.commit()
 
+    # ensure at least one leader exists when the module is imported
+    seed_default_leader()
+
 
 # ---------- LEADERS ----------
 
@@ -110,6 +113,11 @@ def authenticate_leader(username: str, password: str) -> Optional[dict]:
     if row:
         return {"id": row[0], "username": row[1], "constituency": row[2]}
     return None
+
+
+def seed_default_leader():
+    # simple seed for testing version
+    ensure_leader("leader_ainabkoi", "test123", "AINABKOI")
 
 
 # ---------- CONSTITUENCY ----------
@@ -270,6 +278,6 @@ def get_projects_by_constituency(constituency_name: str):
 
 if __name__ == "__main__":
     init_db()
-    # seed example leader
-    ensure_leader("leader_ainabkoi", "test123", "AINABKOI")
-    print("infrasight.db ready with leader + constituency + emergency + projects tables.")
+    print(
+        "infrasight.db ready with leader + constituency + emergency + projects tables."
+    )
