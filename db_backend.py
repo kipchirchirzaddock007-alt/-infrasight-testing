@@ -1,8 +1,13 @@
+import os
 import sqlite3
 from contextlib import contextmanager
-from typing import Optional
+from typing import Optional, List, Tuple
 
 DB_PATH = "infrasight.db"
+
+# Ensure media directory exists
+MEDIA_ROOT = os.path.join("data", "media")
+os.makedirs(MEDIA_ROOT, exist_ok=True)
 
 
 @contextmanager
@@ -18,7 +23,7 @@ def init_db():
     with get_conn() as conn:
         cur = conn.cursor()
 
-        # Leaders (for login, simple for now)
+        # Leaders
         cur.execute(
             """
             CREATE TABLE IF NOT EXISTS leaders (
@@ -50,7 +55,7 @@ def init_db():
             """
         )
 
-        # Emergency assets (ambulances, etc.)
+        # Emergency assets
         cur.execute(
             """
             CREATE TABLE IF NOT EXISTS emergency_assets (
@@ -65,7 +70,7 @@ def init_db():
             """
         )
 
-        # Development projects
+        # Development projects (now with lat/lon)
         cur.execute(
             """
             CREATE TABLE IF NOT EXISTS projects (
@@ -78,21 +83,37 @@ def init_db():
                 timeline TEXT,
                 verification_status TEXT,
                 location TEXT,
-                description TEXT
+                description TEXT,
+                lat REAL,
+                lon REAL
+            );
+            """
+        )
+
+        # Citizen media/evidence linked to projects
+        cur.execute(
+            """
+            CREATE TABLE IF NOT EXISTS project_media (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                project_id INTEGER NOT NULL,
+                media_type TEXT NOT NULL, -- 'image' or 'video'
+                file_path TEXT NOT NULL,
+                caption TEXT,
+                uploader_name TEXT,
+                created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
             );
             """
         )
 
         conn.commit()
 
-    # ensure at least one leader exists when the module is imported
     seed_default_leader()
 
 
 # ---------- LEADERS ----------
 
 def ensure_leader(username: str, password: str, constituency: str):
-    """Create a leader if not exists."""
     with get_conn() as conn:
         cur = conn.cursor()
         cur.execute(
@@ -116,7 +137,6 @@ def authenticate_leader(username: str, password: str) -> Optional[dict]:
 
 
 def seed_default_leader():
-    # simple seed for testing version
     ensure_leader("leader_ainabkoi", "test123", "AINABKOI")
 
 
@@ -178,10 +198,7 @@ def upsert_constituency(
 def get_constituency(name: str):
     with get_conn() as conn:
         cur = conn.cursor()
-        cur.execute(
-            "SELECT * FROM constituencies WHERE name = ?",
-            (name,),
-        )
+        cur.execute("SELECT * FROM constituencies WHERE name = ?", (name,))
         return cur.fetchone()
 
 
@@ -234,6 +251,8 @@ def add_project(
     verification_status: str,
     location: str,
     description: str,
+    lat: Optional[float] = None,
+    lon: Optional[float] = None,
 ):
     with get_conn() as conn:
         cur = conn.cursor()
@@ -242,9 +261,9 @@ def add_project(
             INSERT INTO projects (
                 constituency_name, name, status, budget,
                 implementer, timeline, verification_status,
-                location, description
+                location, description, lat, lon
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 constituency_name,
@@ -256,6 +275,8 @@ def add_project(
                 verification_status,
                 location,
                 description,
+                lat,
+                lon,
             ),
         )
         conn.commit()
@@ -267,7 +288,7 @@ def get_projects_by_constituency(constituency_name: str):
         cur.execute(
             """
             SELECT id, name, status, budget, implementer, timeline,
-                   verification_status, location, description
+                   verification_status, location, description, lat, lon
             FROM projects
             WHERE constituency_name = ?
             """,
@@ -276,8 +297,67 @@ def get_projects_by_constituency(constituency_name: str):
         return cur.fetchall()
 
 
+def get_project_by_id(project_id: int):
+    with get_conn() as conn:
+        cur = conn.cursor()
+        cur.execute(
+            """
+            SELECT id, constituency_name, name, status, budget, implementer,
+                   timeline, verification_status, location, description, lat, lon
+            FROM projects
+            WHERE id = ?
+            """,
+            (project_id,),
+        )
+        return cur.fetchone()
+
+
+# ---------- MEDIA / EVIDENCE ----------
+
+def save_media_file(project_id: int, filename: str, content: bytes, media_type: str, caption: str, uploader_name: str) -> str:
+    """Save file under data/media and record in DB. Returns file_path."""
+    # simple safe basename
+    base = os.path.basename(filename)
+    stored_name = f"p{project_id}_{base}"
+    full_path = os.path.join(MEDIA_ROOT, stored_name)
+
+    # write file
+    with open(full_path, "wb") as f:
+        f.write(content)
+
+    rel_path = os.path.join("data", "media", stored_name)
+
+    with get_conn() as conn:
+        cur = conn.cursor()
+        cur.execute(
+            """
+            INSERT INTO project_media (
+                project_id, media_type, file_path, caption, uploader_name
+            )
+            VALUES (?, ?, ?, ?, ?)
+            """,
+            (project_id, media_type, rel_path, caption, uploader_name),
+        )
+        conn.commit()
+
+    return rel_path
+
+
+def get_media_for_project(project_id: int) -> List[Tuple]:
+    with get_conn() as conn:
+        cur = conn.cursor()
+        cur.execute(
+            """
+            SELECT id, media_type, file_path, caption, uploader_name, created_at
+            FROM project_media
+            WHERE project_id = ?
+            ORDER BY created_at DESC
+            """,
+            (project_id,),
+        )
+        return cur.fetchall()
+
+
 if __name__ == "__main__":
     init_db()
-    print(
-        "infrasight.db ready with leader + constituency + emergency + projects tables."
-    )
+    print("infrasight.db ready.")

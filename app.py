@@ -9,6 +9,9 @@ from db_backend import (
     get_ambulances,
     add_project,
     get_projects_by_constituency,
+    get_project_by_id,
+    save_media_file,
+    get_media_for_project,
 )
 
 init_db()
@@ -185,6 +188,8 @@ def leader_panel():
             proj_location = st.text_input(
                 "Project location (ward, coordinates, landmark)"
             )
+            proj_lat = st.number_input("Latitude (optional)", format="%.6f")
+            proj_lon = st.number_input("Longitude (optional)", format="%.6f")
             proj_desc = st.text_area("Description / notes")
             submit_proj = st.form_submit_button("Add project")
 
@@ -200,10 +205,12 @@ def leader_panel():
                     verification_status=proj_verif,
                     location=proj_location,
                     description=proj_desc,
+                    lat=float(proj_lat) if proj_lat else None,
+                    lon=float(proj_lon) if proj_lon else None,
                 )
-            st.success("Project registered.")
-        else:
-            st.error("Project name is required.")
+                st.success("Project registered.")
+            else:
+                st.error("Project name is required.")
 
         projects = get_projects_by_constituency(constituency)
         if projects:
@@ -219,6 +226,8 @@ def leader_panel():
                     "verification_status",
                     "location",
                     "description",
+                    "lat",
+                    "lon",
                 ],
             )
             st.subheader("Registered projects")
@@ -244,41 +253,145 @@ def debug_create_leader_form():
             )
 
 
-# ------------- CITIZEN VIEW (testing) -------------
+# ------------- CITIZEN VIEW (projects + media) -------------
 
 def citizen_view():
     st.header("INFRASIGHT – Citizen Role Dashboard")
 
     st.write(
-        "This testing version shows a simple view. In v2, this will be fully wired "
-        "to equality metrics, change detection, and detailed media evidence."
+        "Browse real projects, see uploaded photos/videos, and contribute your own observations."
     )
 
-    st.subheader("Browse projects by constituency (read-only demo)")
+    st.subheader("1. Select constituency")
     constituency_name = st.text_input(
         "Enter constituency name (must match what leaders use)", value="AINABKOI"
     )
 
-    if st.button("Load projects"):
+    projects = []
+    if constituency_name:
         projects = get_projects_by_constituency(constituency_name)
-        if projects:
-            df = pd.DataFrame(
-                projects,
-                columns=[
-                    "id",
-                    "name",
-                    "status",
-                    "budget",
-                    "implementer",
-                    "timeline",
-                    "verification_status",
-                    "location",
-                    "description",
-                ],
+
+    if not projects:
+        st.info("No projects found for that constituency yet.")
+        return
+
+    df = pd.DataFrame(
+        projects,
+        columns=[
+            "id",
+            "name",
+            "status",
+            "budget",
+            "implementer",
+            "timeline",
+            "verification_status",
+            "location",
+            "description",
+            "lat",
+            "lon",
+        ],
+    )
+
+    st.subheader("2. Pick a project")
+    proj_options = {
+        f"{row['name']} (#{row['id']})": int(row["id"]) for _, row in df.iterrows()
+    }
+    selected_label = st.selectbox("Project", list(proj_options.keys()))
+    selected_id = proj_options[selected_label]
+
+    project = get_project_by_id(selected_id)
+    if not project:
+        st.error("Project not found.")
+        return
+
+    (
+        pid,
+        p_constituency,
+        p_name,
+        p_status,
+        p_budget,
+        p_impl,
+        p_timeline,
+        p_verif,
+        p_location,
+        p_desc,
+        p_lat,
+        p_lon,
+    ) = project
+
+    st.markdown(f"### Project: {p_name}")
+    st.write(f"**Constituency:** {p_constituency}")
+    st.write(f"**Status:** {p_status}")
+    st.write(f"**Budget:** {p_budget}")
+    st.write(f"**Implementer:** {p_impl}")
+    st.write(f"**Timeline:** {p_timeline}")
+    st.write(f"**Verification:** {p_verif}")
+    st.write(f"**Location:** {p_location}")
+    if p_desc:
+        st.write(p_desc)
+
+    st.markdown("---")
+    st.subheader("3. Project evidence & media")
+
+    # Upload form
+    with st.form("media_upload_form"):
+        uploader_name = st.text_input("Your name (optional)")
+        caption = st.text_area("Comment / observation")
+        uploaded_files = st.file_uploader(
+            "Upload photos/videos (you can select multiple)",
+            type=["jpg", "jpeg", "png", "mp4", "mov", "avi"],
+            accept_multiple_files=True,
+        )
+        submit_media = st.form_submit_button("Submit evidence")
+
+    if submit_media and uploaded_files:
+        for f in uploaded_files:
+            ext = f.name.lower().split(".")[-1]
+            if ext in ["jpg", "jpeg", "png"]:
+                media_type = "image"
+            else:
+                media_type = "video"
+
+            save_media_file(
+                project_id=pid,
+                filename=f.name,
+                content=f.read(),
+                media_type=media_type,
+                caption=caption,
+                uploader_name=uploader_name or "Anonymous",
             )
-            st.dataframe(df, use_container_width=True)
-        else:
-            st.info("No projects found for that constituency yet.")
+        st.success("Your evidence has been submitted.")
+
+    # Gallery
+    media_items = get_media_for_project(pid)
+    if media_items:
+        st.markdown("#### Gallery")
+
+        images = [m for m in media_items if m[1] == "image"]
+        videos = [m for m in media_items if m[1] == "video"]
+
+        if images:
+            st.write("Photos:")
+            cols = st.columns(3)
+            for idx, m in enumerate(images):
+                mid, mtype, path, mcap, muploader, mtime = m
+                col = cols[idx % 3]
+                with col:
+                    st.image(path, use_container_width=True)
+                    if mcap:
+                        st.caption(mcap)
+                    st.caption(f"By {muploader} • {mtime}")
+
+        if videos:
+            st.write("Videos:")
+            for m in videos:
+                mid, mtype, path, mcap, muploader, mtime = m
+                st.video(path)
+                if mcap:
+                    st.caption(mcap)
+                st.caption(f"By {muploader} • {mtime}")
+    else:
+        st.info("No media has been uploaded for this project yet.")
 
 
 # ------------- MAIN ROLE SELECTION -------------
