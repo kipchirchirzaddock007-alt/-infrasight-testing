@@ -154,7 +154,7 @@ def leader_panel():
         if ambulances:
             df_amb = pd.DataFrame(
                 ambulances,
-                columns[
+                columns=[
                     "id",
                     "name",
                     "number_plate",
@@ -201,9 +201,9 @@ def leader_panel():
                     location=proj_location,
                     description=proj_desc,
                 )
-                st.success("Project registered.")
-            else:
-                st.error("Project name is required.")
+            st.success("Project registered.")
+        else:
+            st.error("Project name is required.")
 
         projects = get_projects_by_constituency(constituency)
         if projects:
@@ -225,6 +225,23 @@ def leader_panel():
             st.dataframe(df_proj, use_container_width=True)
         else:
             st.info("No projects registered yet.")
+
+
+# ------------- TEMP ADMIN: CREATE LEADER -------------
+
+def debug_create_leader_form():
+    """Temporary admin form to create a leader directly from the UI."""
+    with st.expander("⚙️ Debug: Create leader (temporary admin tool)"):
+        u = st.text_input("New leader username")
+        p = st.text_input("New leader password", type="password")
+        c = st.text_input("Constituency for this leader", value="AINABKOI")
+        if st.button("Create leader user"):
+            from db_backend import ensure_leader
+
+            ensure_leader(u, p, c)
+            st.success(
+                f"Leader '{u}' for '{c}' created. You can now log in in the sidebar."
+            )
 
 
 # ------------- CITIZEN VIEW (testing) -------------
@@ -286,6 +303,9 @@ def main():
         st.session_state.role = "leader"
 
     st.markdown("---")
+
+    # TEMP admin tool to create leader accounts
+    debug_create_leader_form()
 
     if st.session_state.role == "leader":
         leader_panel()
